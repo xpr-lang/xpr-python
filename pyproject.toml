@@ -9,6 +9,12 @@ license = {text = "MIT"}
 Homepage = "https://github.com/xpr-lang/xpr-python"
 Specification = "https://github.com/xpr-lang/xpr"
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/xpr"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[project.optional-dependencies]
+dev = ["pytest", "pyyaml"]

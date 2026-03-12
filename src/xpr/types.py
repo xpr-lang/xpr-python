@@ -1,0 +1,147 @@
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Union, List, Any, Optional
+
+
+@dataclass
+class NumberLiteral:
+    value: float
+    position: int
+
+
+@dataclass
+class StringLiteral:
+    value: str
+    position: int
+
+
+@dataclass
+class BooleanLiteral:
+    value: bool
+    position: int
+
+
+@dataclass
+class NullLiteral:
+    position: int
+
+
+@dataclass
+class Property:
+    key: str
+    value: Any  # Expression
+    position: int
+
+
+@dataclass
+class ArrayExpression:
+    elements: List[Any]  # List[Expression]
+    position: int
+
+
+@dataclass
+class ObjectExpression:
+    properties: List[Property]
+    position: int
+
+
+@dataclass
+class Identifier:
+    name: str
+    position: int
+
+
+@dataclass
+class MemberExpression:
+    object: Any  # Expression
+    property: Any  # str or Expression
+    computed: bool
+    optional: bool
+    position: int
+
+
+@dataclass
+class BinaryExpression:
+    op: str  # +, -, *, /, %, **, ==, !=, <, >, <=, >=
+    left: Any
+    right: Any
+    position: int
+
+
+@dataclass
+class LogicalExpression:
+    op: str  # &&, ||, ??
+    left: Any
+    right: Any
+    position: int
+
+
+@dataclass
+class UnaryExpression:
+    op: str  # !, -
+    argument: Any
+    position: int
+
+
+@dataclass
+class ConditionalExpression:
+    test: Any
+    consequent: Any
+    alternate: Any
+    position: int
+
+
+@dataclass
+class ArrowFunction:
+    params: List[str]
+    body: Any
+    position: int
+
+
+@dataclass
+class CallExpression:
+    callee: Any
+    arguments: List[Any]
+    optional: bool
+    position: int
+
+
+@dataclass
+class TemplateLiteral:
+    quasis: List[str]
+    expressions: List[Any]
+    position: int
+
+
+@dataclass
+class PipeExpression:
+    left: Any
+    right: Any
+    position: int
+
+
+@dataclass
+class SpreadElement:
+    argument: Any
+    position: int
+
+
+Expression = Union[
+    NumberLiteral,
+    StringLiteral,
+    BooleanLiteral,
+    NullLiteral,
+    ArrayExpression,
+    ObjectExpression,
+    Identifier,
+    MemberExpression,
+    BinaryExpression,
+    LogicalExpression,
+    UnaryExpression,
+    ConditionalExpression,
+    ArrowFunction,
+    CallExpression,
+    TemplateLiteral,
+    PipeExpression,
+    SpreadElement,
+]
