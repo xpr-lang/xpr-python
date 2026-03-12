@@ -1,0 +1,14 @@
+[project]
+name = "xpr-lang"
+version = "0.0.1"
+description = "XPR expression language - Python runtime"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+[project.urls]
+Homepage = "https://github.com/xpr-lang/xpr-python"
+Specification = "https://github.com/xpr-lang/xpr"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
