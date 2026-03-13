@@ -10,6 +10,8 @@ from .types import (
     NullLiteral,
     ArrayExpression,
     ObjectExpression,
+    Property,
+    SpreadProperty,
     Identifier,
     MemberExpression,
     BinaryExpression,
@@ -21,6 +23,7 @@ from .types import (
     TemplateLiteral,
     PipeExpression,
     SpreadElement,
+    LetExpression,
 )
 from .functions import (
     xpr_type,
@@ -88,10 +91,41 @@ def eval_expr(
         return None
 
     if isinstance(node, ArrayExpression):
-        return [nxt(el) for el in node.elements]
+        result = []
+        for el in node.elements:
+            if isinstance(el, SpreadElement):
+                val = nxt(el.argument)
+                if val is None:
+                    raise XprError("Cannot spread null", el.position)
+                if isinstance(val, str):
+                    raise XprError("Cannot spread string into array", el.position)
+                if not isinstance(val, list):
+                    raise XprError("Cannot spread non-array into array", el.position)
+                result.extend(val)
+            else:
+                result.append(nxt(el))
+        return result
 
     if isinstance(node, ObjectExpression):
-        return {prop.key: nxt(prop.value) for prop in node.properties}
+        result = {}
+        for prop in node.properties:
+            if isinstance(prop, SpreadProperty):
+                val = nxt(prop.argument)
+                if val is None:
+                    raise XprError("Cannot spread null", prop.position)
+                if isinstance(val, list):
+                    raise XprError("Cannot spread array into object", prop.position)
+                if not isinstance(val, dict):
+                    raise XprError("Cannot spread non-object", prop.position)
+                result.update(val)
+            else:
+                result[prop.key] = nxt(prop.value)
+        return result
+
+    if isinstance(node, LetExpression):
+        val = nxt(node.value)
+        child_ctx = {**ctx, node.name: val}
+        return eval_expr(node.body, child_ctx, fns, depth + 1, start_time)
 
     if isinstance(node, Identifier):
         if node.name in ctx:
@@ -293,6 +327,8 @@ def eval_expr(
         if isinstance(node.callee, Identifier):
             name = node.callee.name
             args = [nxt(a) for a in node.arguments]
+            if name in ctx and callable(ctx[name]):
+                return ctx[name](*args)
             if name in GLOBAL_FUNCTIONS:
                 arity = GLOBAL_FUNCTION_ARITY.get(name)
                 if arity is not None and len(args) != arity:
@@ -363,6 +399,6 @@ def eval_expr(
         return result
 
     if isinstance(node, SpreadElement):
-        raise XprError("Spread operator not supported in v0.1", node.position)
+        raise XprError("SpreadElement used outside array context", node.position)
 
     raise XprError(f"Unknown AST node type: {type(node).__name__}")

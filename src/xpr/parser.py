@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Optional
+from typing import Any, List, Optional
 from .errors import XprError
 from .tokenizer import Token, TokenType
 from .types import (
@@ -11,6 +11,7 @@ from .types import (
     ArrayExpression,
     ObjectExpression,
     Property,
+    SpreadProperty,
     Identifier,
     MemberExpression,
     BinaryExpression,
@@ -21,6 +22,8 @@ from .types import (
     CallExpression,
     TemplateLiteral,
     PipeExpression,
+    SpreadElement,
+    LetExpression,
 )
 
 BP_PIPE = 10
@@ -188,10 +191,28 @@ class Parser:
                 return ArrowFunction(params=[first.name], body=body, position=pos)
             return first
 
+        if t == TokenType.Let:
+            name_tok = self._expect(TokenType.Identifier)
+            self._expect(TokenType.Equal)
+            value = self.expression(0)
+            self._expect(TokenType.Semicolon)
+            if self._peek().type == TokenType.EOF:
+                raise XprError("Expected expression after ';'", self._peek().position)
+            body = self.expression(0)
+            return LetExpression(
+                name=name_tok.value, value=value, body=body, position=pos
+            )
+
         if t == TokenType.LeftBracket:
             elements: List[Expression] = []
             while self._peek().type not in (TokenType.RightBracket, TokenType.EOF):
-                elements.append(self.expression(0))
+                if self._peek().type == TokenType.DotDotDot:
+                    spread_pos = self._peek().position
+                    self._advance()
+                    arg = self.expression(0)
+                    elements.append(SpreadElement(argument=arg, position=spread_pos))
+                else:
+                    elements.append(self.expression(0))
                 if self._peek().type == TokenType.Comma:
                     self._advance()
                 else:
@@ -200,23 +221,29 @@ class Parser:
             return ArrayExpression(elements=elements, position=pos)
 
         if t == TokenType.LeftBrace:
-            properties: List[Property] = []
+            properties: List[Any] = []
             while self._peek().type not in (TokenType.RightBrace, TokenType.EOF):
-                key_tok = self._peek()
-                if key_tok.type == TokenType.Identifier:
-                    key = self._advance().value
-                elif key_tok.type == TokenType.String:
-                    key = self._advance().value
+                if self._peek().type == TokenType.DotDotDot:
+                    spread_pos = self._peek().position
+                    self._advance()
+                    arg = self.expression(0)
+                    properties.append(SpreadProperty(argument=arg, position=spread_pos))
                 else:
-                    raise XprError(
-                        f"Expected object key at position {key_tok.position}",
-                        key_tok.position,
+                    key_tok = self._peek()
+                    if key_tok.type == TokenType.Identifier:
+                        key = self._advance().value
+                    elif key_tok.type == TokenType.String:
+                        key = self._advance().value
+                    else:
+                        raise XprError(
+                            f"Expected object key at position {key_tok.position}",
+                            key_tok.position,
+                        )
+                    self._expect(TokenType.Colon)
+                    value = self.expression(0)
+                    properties.append(
+                        Property(key=key, value=value, position=key_tok.position)
                     )
-                self._expect(TokenType.Colon)
-                value = self.expression(0)
-                properties.append(
-                    Property(key=key, value=value, position=key_tok.position)
-                )
                 if self._peek().type == TokenType.Comma:
                     self._advance()
                 else:

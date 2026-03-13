@@ -45,6 +45,10 @@ class TokenType(Enum):
     LeftBrace = auto()
     RightBrace = auto()
     EOF = auto()
+    Semicolon = auto()
+    DotDotDot = auto()
+    Let = auto()
+    Equal = auto()
 
 
 @dataclass
@@ -211,7 +215,15 @@ def tokenize(source: str) -> List[Token]:
                 return Token(TokenType.Boolean, ident, start)
             if ident == "null":
                 return Token(TokenType.Null, ident, start)
+            if ident == "let":
+                return Token(TokenType.Let, ident, start)
             return Token(TokenType.Identifier, ident, start)
+
+        # Three-char tokens (must check before two-char)
+        three = source[pos : pos + 3]
+        if three == "...":
+            pos += 3
+            return Token(TokenType.DotDotDot, "...", start)
 
         # Multi-char operators (order matters)
         two = source[pos : pos + 2]
@@ -270,6 +282,8 @@ def tokenize(source: str) -> List[Token]:
             "]": TokenType.RightBracket,
             "{": TokenType.LeftBrace,
             "}": TokenType.RightBrace,
+            ";": TokenType.Semicolon,
+            "=": TokenType.Equal,
         }
         if ch in mapping:
             return Token(mapping[ch], ch, start)

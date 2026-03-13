@@ -1,6 +1,6 @@
 [project]
 name = "xpr-lang"
-version = "0.0.1"
+version = "0.2.0"
 description = "XPR expression language - Python runtime"
 requires-python = ">=3.10"
 license = {text = "MIT"}

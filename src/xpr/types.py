@@ -34,6 +34,12 @@ class Property:
 
 
 @dataclass
+class SpreadProperty:
+    argument: Any  # Expression
+    position: int
+
+
+@dataclass
 class ArrayExpression:
     elements: List[Any]  # List[Expression]
     position: int
@@ -41,7 +47,7 @@ class ArrayExpression:
 
 @dataclass
 class ObjectExpression:
-    properties: List[Property]
+    properties: List[Any]  # List[Union[Property, SpreadProperty]]
     position: int
 
 
@@ -126,6 +132,14 @@ class SpreadElement:
     position: int
 
 
+@dataclass
+class LetExpression:
+    name: str
+    value: Any  # Expression
+    body: Any  # Expression
+    position: int
+
+
 Expression = Union[
     NumberLiteral,
     StringLiteral,
@@ -144,4 +158,6 @@ Expression = Union[
     TemplateLiteral,
     PipeExpression,
     SpreadElement,
+    SpreadProperty,
+    LetExpression,
 ]
