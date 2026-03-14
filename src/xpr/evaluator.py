@@ -35,6 +35,22 @@ from .functions import (
     GLOBAL_FUNCTION_ARITY,
 )
 
+
+def _expand_args(raw_args, nxt):
+    result = []
+    for arg in raw_args:
+        if isinstance(arg, SpreadElement):
+            val = nxt(arg.argument)
+            if val is None:
+                raise XprError("Cannot spread null", arg.position)
+            if not isinstance(val, list):
+                raise XprError("Cannot spread non-array", arg.position)
+            result.extend(val)
+        else:
+            result.append(nxt(arg))
+    return result
+
+
 BLOCKED_PROPS = frozenset(
     [
         "__proto__",
@@ -150,8 +166,8 @@ def eval_expr(
                 if not isinstance(obj, list):
                     raise XprError("Cannot index non-array with number", node.position)
                 if idx < 0:
-                    raise XprError("negative indexing not supported", node.position)
-                return obj[idx] if idx < len(obj) else None
+                    idx = len(obj) + idx
+                return obj[idx] if 0 <= idx < len(obj) else None
             prop_name = str(key)
         else:
             prop_name = node.property
@@ -310,7 +326,7 @@ def eval_expr(
                     f"Access denied: '{method_name}' is a restricted property", pos
                 )
 
-            args = [nxt(a) for a in node.arguments]
+            args = _expand_args(node.arguments, nxt)
 
             if isinstance(obj, str):
                 return call_string_method(obj, method_name, args, pos)
@@ -326,7 +342,7 @@ def eval_expr(
 
         if isinstance(node.callee, Identifier):
             name = node.callee.name
-            args = [nxt(a) for a in node.arguments]
+            args = _expand_args(node.arguments, nxt)
             if name in ctx and callable(ctx[name]):
                 return ctx[name](*args)
             if name in GLOBAL_FUNCTIONS:
@@ -344,7 +360,7 @@ def eval_expr(
         callee = nxt(node.callee)
         if node.optional and callee is None:
             return None
-        args = [nxt(a) for a in node.arguments]
+        args = _expand_args(node.arguments, nxt)
         if callable(callee):
             return callee(*args)
         raise XprError("Cannot call non-function", pos)
