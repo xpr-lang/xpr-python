@@ -99,7 +99,7 @@ class ConditionalExpression:
 
 @dataclass
 class ArrowFunction:
-    params: List[str]
+    params: List[Any]  # List[str | ObjectPattern | ArrayPattern]
     body: Any
     position: int
 
@@ -133,8 +133,45 @@ class SpreadElement:
 
 
 @dataclass
+class RegexLiteral:
+    pattern: str
+    flags: str
+    position: int
+
+
+@dataclass
+class PatternProperty:
+    key: str
+    value: Any  # BindingTarget (str | ObjectPattern | ArrayPattern)
+    default_value: Any  # Expression | None
+    shorthand: bool
+    rest: bool
+    position: int
+
+
+@dataclass
+class ArrayPatternElement:
+    element: Any  # BindingTarget
+    default_value: Any  # Expression | None
+    rest: bool
+    position: int
+
+
+@dataclass
+class ObjectPattern:
+    properties: List[Any]  # List[PatternProperty]
+    position: int
+
+
+@dataclass
+class ArrayPattern:
+    elements: List[Any]  # List[ArrayPatternElement]
+    position: int
+
+
+@dataclass
 class LetExpression:
-    name: str
+    name: Any  # str | ObjectPattern | ArrayPattern
     value: Any  # Expression
     body: Any  # Expression
     position: int
@@ -160,4 +197,5 @@ Expression = Union[
     SpreadElement,
     SpreadProperty,
     LetExpression,
+    RegexLiteral,
 ]

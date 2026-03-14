@@ -40,6 +40,8 @@ TEST_IDS = [f"{s}::{t['name']}" for s, t in ALL_TESTS]
 
 @pytest.mark.parametrize("suite_name,test_case", ALL_TESTS, ids=TEST_IDS)
 def test_conformance(suite_name, test_case):
+    if test_case.get("skip"):
+        pytest.skip(f"Skipped: {test_case['name']}")
     engine = Xpr()
     expression = test_case["expression"]
     context = test_case.get("context") or {}

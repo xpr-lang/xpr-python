@@ -24,6 +24,9 @@ from .types import (
     PipeExpression,
     SpreadElement,
     LetExpression,
+    RegexLiteral,
+    ObjectPattern,
+    ArrayPattern,
 )
 from .functions import (
     xpr_type,
@@ -31,6 +34,8 @@ from .functions import (
     call_string_method,
     call_array_method,
     call_object_method,
+    call_regex_method,
+    is_regex,
     GLOBAL_FUNCTIONS,
     GLOBAL_FUNCTION_ARITY,
 )
@@ -49,6 +54,43 @@ def _expand_args(raw_args, nxt):
         else:
             result.append(nxt(arg))
     return result
+
+
+def _destructure_into(target, value, ctx, nxt):
+    if isinstance(target, str):
+        ctx[target] = value
+        return
+    if isinstance(target, ObjectPattern):
+        if value is None:
+            raise XprError("Cannot destructure null")
+        obj = value if isinstance(value, dict) else {}
+        used_keys = set()
+        for prop in target.properties:
+            if prop.rest:
+                rest = {k: v for k, v in obj.items() if k not in used_keys}
+                ctx[prop.value] = rest
+            else:
+                used_keys.add(prop.key)
+                val = obj.get(prop.key, None)
+                if val is None and prop.default_value is not None:
+                    val = nxt(prop.default_value)
+                _destructure_into(prop.value, val, ctx, nxt)
+    elif isinstance(target, ArrayPattern):
+        if value is None:
+            raise XprError("Cannot destructure null")
+        if not isinstance(value, list):
+            raise XprError("Cannot destructure non-array as array")
+        arr = value
+        i = 0
+        for el in target.elements:
+            if el.rest:
+                ctx[el.element] = arr[i:]
+                break
+            val = arr[i] if i < len(arr) else None
+            if val is None and el.default_value is not None:
+                val = nxt(el.default_value)
+            _destructure_into(el.element, val, ctx, nxt)
+            i += 1
 
 
 BLOCKED_PROPS = frozenset(
@@ -140,8 +182,30 @@ def eval_expr(
 
     if isinstance(node, LetExpression):
         val = nxt(node.value)
-        child_ctx = {**ctx, node.name: val}
+        child_ctx = {**ctx}
+        _destructure_into(node.name, val, child_ctx, nxt)
         return eval_expr(node.body, child_ctx, fns, depth + 1, start_time)
+
+    if isinstance(node, RegexLiteral):
+        import re as _re
+
+        flags = 0
+        if "i" in node.flags:
+            flags |= _re.IGNORECASE
+        if "m" in node.flags:
+            flags |= _re.MULTILINE
+        if "s" in node.flags:
+            flags |= _re.DOTALL
+        try:
+            compiled = _re.compile(node.pattern, flags)
+        except _re.error as e:
+            raise XprError(f"invalid regex pattern: {e}", node.position)
+        return {
+            "__xpr_regex": True,
+            "pattern": node.pattern,
+            "flags": node.flags,
+            "compiled": compiled,
+        }
 
     if isinstance(node, Identifier):
         if node.name in ctx:
@@ -191,14 +255,28 @@ def eval_expr(
         op = node.op
 
         if op == "==":
-            # Strict equality: bool and number are different types (like JS ===)
+            if is_regex(left) and is_regex(right):
+                return (
+                    left["pattern"] == right["pattern"]
+                    and left["flags"] == right["flags"]
+                )
             if isinstance(left, bool) != isinstance(right, bool):
                 return False
             return left == right
         if op == "!=":
+            if is_regex(left) and is_regex(right):
+                return (
+                    left["pattern"] != right["pattern"]
+                    or left["flags"] != right["flags"]
+                )
             if isinstance(left, bool) != isinstance(right, bool):
                 return True
             return left != right
+
+        if is_regex(left) or is_regex(right):
+            raise XprError(
+                f"Type error: cannot use operator '{op}' with regex", node.position
+            )
 
         if op == "+":
             if isinstance(left, str) and isinstance(right, str):
@@ -301,7 +379,14 @@ def eval_expr(
         def arrow(*args):
             child_ctx = dict(captured_ctx)
             for i, p in enumerate(params):
-                child_ctx[p] = args[i] if i < len(args) else None
+                arg = args[i] if i < len(args) else None
+                if isinstance(p, str):
+                    child_ctx[p] = arg
+                else:
+                    inner_nxt = lambda e, _ctx=child_ctx: eval_expr(
+                        e, _ctx, fns, depth + 1, start_time
+                    )
+                    _destructure_into(p, arg, child_ctx, inner_nxt)
             return eval_expr(body, child_ctx, fns, depth + 1, start_time)
 
         return arrow
@@ -332,6 +417,8 @@ def eval_expr(
                 return call_string_method(obj, method_name, args, pos)
             if isinstance(obj, list):
                 return call_array_method(obj, method_name, args, pos)
+            if is_regex(obj):
+                return call_regex_method(obj, method_name, args, pos)
             if isinstance(obj, dict):
                 return call_object_method(obj, method_name, args, pos)
 
@@ -396,6 +483,9 @@ def eval_expr(
                 return fns[name](left)
             return _dispatch_method_or_error(left, name, [], node.position)
 
+        rhs_val = nxt(node.right)
+        if callable(rhs_val):
+            return rhs_val(left)
         raise XprError("Pipe RHS must be callable", node.position)
 
     if isinstance(node, TemplateLiteral):

@@ -49,6 +49,7 @@ class TokenType(Enum):
     DotDotDot = auto()
     Let = auto()
     Equal = auto()
+    Regex = auto()
 
 
 @dataclass
@@ -70,10 +71,43 @@ def _process_escape(ch: str) -> str:
     }.get(ch, ch)
 
 
+_REGEX_AFTER = {
+    TokenType.Equal,
+    TokenType.EqualEqual,
+    TokenType.BangEqual,
+    TokenType.LeftParen,
+    TokenType.LeftBracket,
+    TokenType.LeftBrace,
+    TokenType.Comma,
+    TokenType.Semicolon,
+    TokenType.Question,
+    TokenType.Colon,
+    TokenType.PipeGreater,
+    TokenType.Arrow,
+    TokenType.AmpAmp,
+    TokenType.PipePipe,
+    TokenType.QuestionQuestion,
+    TokenType.Bang,
+    TokenType.Plus,
+    TokenType.Minus,
+    TokenType.Star,
+    TokenType.Slash,
+    TokenType.Percent,
+    TokenType.StarStar,
+    TokenType.Less,
+    TokenType.Greater,
+    TokenType.LessEqual,
+    TokenType.GreaterEqual,
+    TokenType.DotDotDot,
+    TokenType.Let,
+}
+
+
 def tokenize(source: str) -> List[Token]:
     tokens: List[Token] = []
     pos = 0
     length = len(source)
+    last_type: "TokenType | None" = None
 
     def peek(offset: int = 0) -> str:
         idx = pos + offset
@@ -100,8 +134,35 @@ def tokenize(source: str) -> List[Token]:
                 value += ch
         raise XprError(f"Unterminated string at position {start}", start)
 
+    def read_regex(start: int) -> Token:
+        pattern = ""
+        in_class = False
+        while pos < length:
+            ch = advance()
+            if ch == "\n":
+                raise XprError(f"Unterminated regex literal at position {start}", start)
+            if ch == "\\":
+                esc = advance()
+                pattern += "\\" + esc
+                continue
+            if ch == "[":
+                in_class = True
+                pattern += ch
+                continue
+            if ch == "]":
+                in_class = False
+                pattern += ch
+                continue
+            if ch == "/" and not in_class:
+                flags = ""
+                while pos < length and source[pos] in "imsgu":
+                    flags += advance()
+                return Token(TokenType.Regex, pattern + "/" + flags, start)
+            pattern += ch
+        raise XprError(f"Unterminated regex literal at position {start}", start)
+
     def read_template_content():
-        """Returns (content, ended, interpolation)"""
+        nonlocal last_type
         content = ""
         while pos < length:
             ch = peek()
@@ -124,7 +185,7 @@ def tokenize(source: str) -> List[Token]:
         raise XprError("Unterminated template literal", pos)
 
     def tokenize_segment() -> List[Token]:
-        """Tokenize inside ${...}, tracking brace depth."""
+        nonlocal last_type
         seg: List[Token] = []
         depth = 1
         while pos < length and depth > 0:
@@ -132,7 +193,9 @@ def tokenize(source: str) -> List[Token]:
             if ch == "{":
                 depth += 1
                 advance()
-                seg.append(Token(TokenType.LeftBrace, "{", pos - 1))
+                t = Token(TokenType.LeftBrace, "{", pos - 1)
+                seg.append(t)
+                last_type = t.type
                 continue
             if ch == "}":
                 depth -= 1
@@ -140,12 +203,15 @@ def tokenize(source: str) -> List[Token]:
                     advance()
                     break
                 advance()
-                seg.append(Token(TokenType.RightBrace, "}", pos - 1))
+                t = Token(TokenType.RightBrace, "}", pos - 1)
+                seg.append(t)
+                last_type = t.type
                 continue
             saved = pos
             t = next_token()
             if t is not None:
                 seg.append(t)
+                last_type = t.type
             elif pos == saved:
                 advance()
         return seg
@@ -262,6 +328,9 @@ def tokenize(source: str) -> List[Token]:
             return Token(TokenType.Arrow, "=>", start)
 
         # Single-char operators
+        if ch == "/" and (last_type is None or last_type in _REGEX_AFTER):
+            advance()
+            return read_regex(start)
         advance()
         mapping = {
             "+": TokenType.Plus,
@@ -298,6 +367,7 @@ def tokenize(source: str) -> List[Token]:
         t = next_token()
         if t is not None:
             tokens.append(t)
+            last_type = t.type
 
     tokens.append(Token(TokenType.EOF, "", pos))
     return tokens

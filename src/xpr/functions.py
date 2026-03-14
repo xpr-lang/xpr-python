@@ -12,6 +12,23 @@ from typing import Any, Callable, List
 from .errors import XprError
 
 
+def is_regex(v: Any) -> bool:
+    return isinstance(v, dict) and v.get("__xpr_regex") is True
+
+
+def call_regex_method(re_val: Any, method: str, args: list, pos: int) -> Any:
+    if method == "test":
+        if len(args) != 1:
+            raise XprError(
+                f"Wrong number of arguments for 'test': expected 1, got {len(args)}",
+                pos,
+            )
+        if not isinstance(args[0], str):
+            raise XprError("Type error: test expects string", pos)
+        return bool(re_val["compiled"].search(args[0]))
+    raise XprError(f"Type error: regex has no method '{method}'", pos)
+
+
 def xpr_type(v: Any) -> str:
     if v is None:
         return "null"
@@ -23,6 +40,8 @@ def xpr_type(v: Any) -> str:
         return "string"
     if isinstance(v, list):
         return "array"
+    if is_regex(v):
+        return "regex"
     if isinstance(v, dict):
         return "object"
     if callable(v):
@@ -118,9 +137,27 @@ def call_string_method(obj: Any, method: str, args: List[Any], pos: int) -> Any:
                 f"Wrong number of arguments for 'replace': expected 2, got {len(args)}",
                 pos,
             )
-        if not isinstance(args[0], str) or not isinstance(args[1], str):
-            raise XprError("Type error: replace expects string arguments", pos)
+        if not isinstance(args[1], str):
+            raise XprError("Type error: replace replacement must be string", pos)
+        if is_regex(args[0]):
+            re_val = args[0]
+            py_repl = _re.sub(r"\$(\d+)", r"\\\1", args[1])
+            return re_val["compiled"].sub(py_repl, s)
+        if not isinstance(args[0], str):
+            raise XprError(
+                "Type error: replace expects string or regex as first argument", pos
+            )
         return s.replace(args[0], args[1])
+    if method == "match":
+        if len(args) != 1:
+            raise XprError(
+                f"Wrong number of arguments for 'match': expected 1, got {len(args)}",
+                pos,
+            )
+        if not is_regex(args[0]):
+            raise XprError("Type error: match expects regex argument", pos)
+        m = args[0]["compiled"].search(s)
+        return m.group(0) if m else None
     if method == "slice":
         if len(args) < 1 or len(args) > 2:
             raise XprError(
@@ -579,6 +616,8 @@ def _make_global_functions() -> dict:
             )
         if isinstance(v, str):
             return v
+        if is_regex(v):
+            return f"/{v['pattern']}/{v['flags']}"
         return json.dumps(v)
 
     def _bool(v):

@@ -24,6 +24,11 @@ from .types import (
     PipeExpression,
     SpreadElement,
     LetExpression,
+    RegexLiteral,
+    ObjectPattern,
+    ArrayPattern,
+    PatternProperty,
+    ArrayPatternElement,
 )
 
 BP_PIPE = 10
@@ -106,6 +111,141 @@ class Parser:
             )
         return self._advance()
 
+    def _parse_binding_target(self) -> Any:
+        if self._peek().type == TokenType.LeftBrace:
+            return self._parse_object_pattern()
+        if self._peek().type == TokenType.LeftBracket:
+            return self._parse_array_pattern()
+        return self._expect(TokenType.Identifier).value
+
+    def _parse_object_pattern(self) -> ObjectPattern:
+        pos = self._peek().position
+        self._expect(TokenType.LeftBrace)
+        properties: List[PatternProperty] = []
+        seen: set = set()
+        while self._peek().type not in (TokenType.RightBrace, TokenType.EOF):
+            prop_pos = self._peek().position
+            if self._peek().type == TokenType.DotDotDot:
+                self._advance()
+                rest_id = self._expect(TokenType.Identifier).value
+                properties.append(
+                    PatternProperty(
+                        key=rest_id,
+                        value=rest_id,
+                        default_value=None,
+                        shorthand=True,
+                        rest=True,
+                        position=prop_pos,
+                    )
+                )
+                break
+            key_tok = self._peek()
+            if key_tok.type in (TokenType.Identifier, TokenType.String):
+                key = self._advance().value
+            else:
+                raise XprError(
+                    f"Expected property key at position {key_tok.position}",
+                    key_tok.position,
+                )
+            if self._peek().type == TokenType.Colon:
+                self._advance()
+                value = self._parse_binding_target()
+                default_value = None
+                if self._peek().type == TokenType.Equal:
+                    self._advance()
+                    default_value = self.expression(0)
+                properties.append(
+                    PatternProperty(
+                        key=key,
+                        value=value,
+                        default_value=default_value,
+                        shorthand=False,
+                        rest=False,
+                        position=prop_pos,
+                    )
+                )
+            elif self._peek().type == TokenType.Equal:
+                self._advance()
+                default_value = self.expression(0)
+                if key in seen:
+                    raise XprError(f"duplicate binding '{key}'", prop_pos)
+                seen.add(key)
+                properties.append(
+                    PatternProperty(
+                        key=key,
+                        value=key,
+                        default_value=default_value,
+                        shorthand=True,
+                        rest=False,
+                        position=prop_pos,
+                    )
+                )
+            else:
+                if key in seen:
+                    raise XprError(f"duplicate binding '{key}'", prop_pos)
+                seen.add(key)
+                properties.append(
+                    PatternProperty(
+                        key=key,
+                        value=key,
+                        default_value=None,
+                        shorthand=True,
+                        rest=False,
+                        position=prop_pos,
+                    )
+                )
+            if self._peek().type == TokenType.Comma:
+                self._advance()
+            else:
+                break
+        self._expect(TokenType.RightBrace)
+        return ObjectPattern(properties=properties, position=pos)
+
+    def _parse_array_pattern(self) -> ArrayPattern:
+        pos = self._peek().position
+        self._expect(TokenType.LeftBracket)
+        elements: List[ArrayPatternElement] = []
+        while self._peek().type not in (TokenType.RightBracket, TokenType.EOF):
+            el_pos = self._peek().position
+            if self._peek().type == TokenType.DotDotDot:
+                self._advance()
+                rest_id = self._expect(TokenType.Identifier).value
+                elements.append(
+                    ArrayPatternElement(
+                        element=rest_id, default_value=None, rest=True, position=el_pos
+                    )
+                )
+                break
+            element = self._parse_binding_target()
+            default_value = None
+            if self._peek().type == TokenType.Equal:
+                self._advance()
+                default_value = self.expression(0)
+            elements.append(
+                ArrayPatternElement(
+                    element=element,
+                    default_value=default_value,
+                    rest=False,
+                    position=el_pos,
+                )
+            )
+            if self._peek().type == TokenType.Comma:
+                self._advance()
+            else:
+                break
+        self._expect(TokenType.RightBracket)
+        return ArrayPattern(elements=elements, position=pos)
+
+    def _parse_arrow_param_list(self) -> List[Any]:
+        params: List[Any] = []
+        while self._peek().type not in (TokenType.RightParen, TokenType.EOF):
+            params.append(self._parse_binding_target())
+            if self._peek().type == TokenType.Comma:
+                self._advance()
+            else:
+                break
+        return params
+
     def _parse_arg_list(self) -> List[Expression]:
         args: List[Expression] = []
         while self._peek().type not in (TokenType.RightParen, TokenType.EOF):
@@ -136,6 +276,12 @@ class Parser:
 
         if t == TokenType.Null:
             return NullLiteral(position=pos)
+
+        if t == TokenType.Regex:
+            slash_idx = token.value.rfind("/")
+            pattern = token.value[:slash_idx]
+            flags = token.value[slash_idx + 1 :]
+            return RegexLiteral(pattern=pattern, flags=flags, position=pos)
 
         if t == TokenType.TemplateLiteral:
             return TemplateLiteral(quasis=[token.value], expressions=[], position=pos)
@@ -172,9 +318,15 @@ class Parser:
                 self._expect(TokenType.Arrow)
                 body = self.expression(0)
                 return ArrowFunction(params=[], body=body, position=pos)
+            if self._peek().type in (TokenType.LeftBrace, TokenType.LeftBracket):
+                params_list = self._parse_arrow_param_list()
+                self._expect(TokenType.RightParen)
+                self._expect(TokenType.Arrow)
+                body = self.expression(0)
+                return ArrowFunction(params=params_list, body=body, position=pos)
             first = self.expression(0)
             if self._peek().type == TokenType.Comma:
-                params: List[str] = []
+                params: List[Any] = []
                 if not isinstance(first, Identifier):
                     raise XprError(
                         f"Arrow function params must be identifiers at position {pos}",
@@ -183,8 +335,13 @@ class Parser:
                 params.append(first.name)
                 while self._peek().type == TokenType.Comma:
                     self._advance()
-                    p = self._expect(TokenType.Identifier)
-                    params.append(p.value)
+                    if self._peek().type == TokenType.LeftBrace:
+                        params.append(self._parse_object_pattern())
+                    elif self._peek().type == TokenType.LeftBracket:
+                        params.append(self._parse_array_pattern())
+                    else:
+                        p = self._expect(TokenType.Identifier)
+                        params.append(p.value)
                 self._expect(TokenType.RightParen)
                 self._expect(TokenType.Arrow)
                 body = self.expression(0)
@@ -197,16 +354,19 @@ class Parser:
             return first
 
         if t == TokenType.Let:
-            name_tok = self._expect(TokenType.Identifier)
+            if self._peek().type == TokenType.LeftBrace:
+                name = self._parse_object_pattern()
+            elif self._peek().type == TokenType.LeftBracket:
+                name = self._parse_array_pattern()
+            else:
+                name = self._expect(TokenType.Identifier).value
             self._expect(TokenType.Equal)
             value = self.expression(0)
             self._expect(TokenType.Semicolon)
             if self._peek().type == TokenType.EOF:
                 raise XprError("Expected expression after ';'", self._peek().position)
             body = self.expression(0)
-            return LetExpression(
-                name=name_tok.value, value=value, body=body, position=pos
-            )
+            return LetExpression(name=name, value=value, body=body, position=pos)
 
         if t == TokenType.LeftBracket:
             elements: List[Expression] = []
