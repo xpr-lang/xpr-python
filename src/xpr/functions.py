@@ -1,6 +1,13 @@
 from __future__ import annotations
 import json
 import math
+import re as _re
+import calendar as _calendar
+from datetime import (
+    datetime as _datetime,
+    timezone as _timezone,
+    timedelta as _timedelta,
+)
 from typing import Any, Callable, List
 from .errors import XprError
 
@@ -610,19 +617,315 @@ def _make_global_functions() -> dict:
                 i += step_int
         return result
 
+    _VALID_UNITS = {
+        "years",
+        "months",
+        "days",
+        "hours",
+        "minutes",
+        "seconds",
+        "milliseconds",
+    }
+
+    def _now():
+        return float(_datetime.now(_timezone.utc).timestamp() * 1000)
+
+    def _parse_date(*args):
+        if len(args) < 1 or len(args) > 2:
+            raise XprError(
+                f"Wrong number of arguments for 'parseDate': expected 1-2, got {len(args)}"
+            )
+        str_val = args[0]
+        if not isinstance(str_val, str):
+            raise XprError("Type error: parseDate expects string")
+        fmt = args[1] if len(args) == 2 else None
+        if fmt is None:
+            try:
+                s = str_val.replace("Z", "+00:00")
+                if "T" not in s and len(s) == 10:
+                    s = s + "T00:00:00+00:00"
+                dt = _datetime.fromisoformat(s)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=_timezone.utc)
+                return float(dt.timestamp() * 1000)
+            except (ValueError, TypeError):
+                raise XprError(f'invalid date string: "{str_val}"')
+        if not isinstance(fmt, str):
+            raise XprError("Type error: parseDate format must be string")
+        token_patterns = {
+            "yyyy": r"(\d{4})",
+            "MM": r"(\d{2})",
+            "dd": r"(\d{2})",
+            "HH": r"(\d{2})",
+            "mm": r"(\d{2})",
+            "ss": r"(\d{2})",
+            "SSS": r"(\d{3})",
+        }
+        token_names = _re.findall(r"yyyy|MM|dd|HH|mm|ss|SSS", fmt)
+        regex_str = _re.escape(fmt)
+        for t in token_names:
+            regex_str = regex_str.replace(_re.escape(t), token_patterns[t], 1)
+        m = _re.fullmatch(regex_str, str_val)
+        if not m:
+            raise XprError(
+                f'invalid date string: "{str_val}" does not match format "{fmt}"'
+            )
+        year, month, day, hour, minute, second, ms = 1970, 1, 1, 0, 0, 0, 0
+        for i, t in enumerate(token_names):
+            v = int(m.group(i + 1))
+            if t == "yyyy":
+                year = v
+            elif t == "MM":
+                month = v
+            elif t == "dd":
+                day = v
+            elif t == "HH":
+                hour = v
+            elif t == "mm":
+                minute = v
+            elif t == "ss":
+                second = v
+            elif t == "SSS":
+                ms = v
+        dt = _datetime(
+            year, month, day, hour, minute, second, ms * 1000, tzinfo=_timezone.utc
+        )
+        return float(dt.timestamp() * 1000)
+
+    def _format_date(date_val, fmt):
+        if isinstance(date_val, bool) or not isinstance(date_val, (int, float)):
+            raise XprError("Type error: formatDate expects number (epoch ms)")
+        if not isinstance(fmt, str):
+            raise XprError("Type error: formatDate format must be string")
+        dt = _datetime.fromtimestamp(float(date_val) / 1000, tz=_timezone.utc)
+        result = fmt
+        result = result.replace("yyyy", str(dt.year).zfill(4))
+        result = result.replace("MM", str(dt.month).zfill(2))
+        result = result.replace("dd", str(dt.day).zfill(2))
+        result = result.replace("HH", str(dt.hour).zfill(2))
+        result = result.replace("mm", str(dt.minute).zfill(2))
+        result = result.replace("ss", str(dt.second).zfill(2))
+        result = result.replace("SSS", str(dt.microsecond // 1000).zfill(3))
+        return result
+
+    def _assert_epoch(v, name):
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise XprError(f"Type error: {name} expects number (epoch ms)")
+        return _datetime.fromtimestamp(float(v) / 1000, tz=_timezone.utc)
+
+    def _year(v):
+        return float(_assert_epoch(v, "year").year)
+
+    def _month(v):
+        return float(_assert_epoch(v, "month").month)
+
+    def _day(v):
+        return float(_assert_epoch(v, "day").day)
+
+    def _hour(v):
+        return float(_assert_epoch(v, "hour").hour)
+
+    def _minute(v):
+        return float(_assert_epoch(v, "minute").minute)
+
+    def _second(v):
+        return float(_assert_epoch(v, "second").second)
+
+    def _millisecond(v):
+        return float(_assert_epoch(v, "millisecond").microsecond // 1000)
+
+    def _date_add(date_val, amount, unit):
+        if isinstance(date_val, bool) or not isinstance(date_val, (int, float)):
+            raise XprError("Type error: dateAdd expects number (epoch ms)")
+        if isinstance(amount, bool) or not isinstance(amount, (int, float)):
+            raise XprError("Type error: dateAdd amount must be number")
+        if not isinstance(unit, str):
+            raise XprError("Type error: dateAdd unit must be string")
+        if unit not in _VALID_UNITS:
+            raise XprError(f'invalid unit "{unit}" for dateAdd')
+        amt = int(amount)
+        dt = _datetime.fromtimestamp(float(date_val) / 1000, tz=_timezone.utc)
+        if unit == "years":
+            dt = dt.replace(year=dt.year + amt)
+        elif unit == "months":
+            total = (dt.month - 1) + amt
+            new_year = dt.year + total // 12
+            new_month = total % 12 + 1
+            max_day = _calendar.monthrange(new_year, new_month)[1]
+            overflow = max(0, dt.day - max_day)
+            dt = dt.replace(year=new_year, month=new_month, day=min(dt.day, max_day))
+            if overflow:
+                dt = dt + _timedelta(days=overflow)
+        elif unit == "days":
+            dt = dt + _timedelta(days=amt)
+        elif unit == "hours":
+            dt = dt + _timedelta(hours=amt)
+        elif unit == "minutes":
+            dt = dt + _timedelta(minutes=amt)
+        elif unit == "seconds":
+            dt = dt + _timedelta(seconds=amt)
+        elif unit == "milliseconds":
+            return float(date_val) + float(amt)
+        return float(dt.timestamp() * 1000)
+
+    def _date_diff(date1, date2, unit):
+        if isinstance(date1, bool) or not isinstance(date1, (int, float)):
+            raise XprError("Type error: dateDiff expects number (epoch ms)")
+        if isinstance(date2, bool) or not isinstance(date2, (int, float)):
+            raise XprError("Type error: dateDiff expects number (epoch ms)")
+        if not isinstance(unit, str):
+            raise XprError("Type error: dateDiff unit must be string")
+        if unit not in _VALID_UNITS:
+            raise XprError(f'invalid unit "{unit}" for dateDiff')
+        diff_ms = float(date2) - float(date1)
+        if unit == "milliseconds":
+            return diff_ms
+        if unit == "seconds":
+            return float(int(diff_ms / 1000))
+        if unit == "minutes":
+            return float(int(diff_ms / 60000))
+        if unit == "hours":
+            return float(int(diff_ms / 3600000))
+        if unit == "days":
+            return float(int(diff_ms / 86400000))
+        d1 = _datetime.fromtimestamp(float(date1) / 1000, tz=_timezone.utc)
+        d2 = _datetime.fromtimestamp(float(date2) / 1000, tz=_timezone.utc)
+        if unit == "months":
+            return float((d2.year - d1.year) * 12 + (d2.month - d1.month))
+        if unit == "years":
+            return float(d2.year - d1.year)
+
+    def _extract_inline_flags(pattern):
+        m = _re.match(r"^\(\?([imsu]+)\)(.*)", pattern, _re.DOTALL)
+        if m:
+            return m.group(2), m.group(1)
+        return pattern, ""
+
+    def _matches(str_val, pattern):
+        if not isinstance(str_val, str):
+            raise XprError("Type error: matches expects string")
+        if not isinstance(pattern, str):
+            raise XprError("Type error: matches pattern must be string")
+        try:
+            src, flags_str = _extract_inline_flags(pattern)
+            flags = 0
+            if "i" in flags_str:
+                flags |= _re.IGNORECASE
+            if "m" in flags_str:
+                flags |= _re.MULTILINE
+            if "s" in flags_str:
+                flags |= _re.DOTALL
+            return bool(_re.search(src, str_val, flags))
+        except _re.error as e:
+            raise XprError(f"invalid regex pattern: {e}")
+
+    def _match(str_val, pattern):
+        if not isinstance(str_val, str):
+            raise XprError("Type error: match expects string")
+        if not isinstance(pattern, str):
+            raise XprError("Type error: match pattern must be string")
+        try:
+            src, flags_str = _extract_inline_flags(pattern)
+            flags = 0
+            if "i" in flags_str:
+                flags |= _re.IGNORECASE
+            if "m" in flags_str:
+                flags |= _re.MULTILINE
+            if "s" in flags_str:
+                flags |= _re.DOTALL
+            m = _re.search(src, str_val, flags)
+            return m.group(0) if m else None
+        except _re.error as e:
+            raise XprError(f"invalid regex pattern: {e}")
+
+    def _match_all(str_val, pattern):
+        if not isinstance(str_val, str):
+            raise XprError("Type error: matchAll expects string")
+        if not isinstance(pattern, str):
+            raise XprError("Type error: matchAll pattern must be string")
+        try:
+            src, flags_str = _extract_inline_flags(pattern)
+            flags = 0
+            if "i" in flags_str:
+                flags |= _re.IGNORECASE
+            if "m" in flags_str:
+                flags |= _re.MULTILINE
+            if "s" in flags_str:
+                flags |= _re.DOTALL
+            return _re.findall(src, str_val, flags)
+        except _re.error as e:
+            raise XprError(f"invalid regex pattern: {e}")
+
+    def _replace_pattern(str_val, pattern, replacement):
+        if not isinstance(str_val, str):
+            raise XprError("Type error: replacePattern expects string")
+        if not isinstance(pattern, str):
+            raise XprError("Type error: replacePattern pattern must be string")
+        if not isinstance(replacement, str):
+            raise XprError("Type error: replacePattern replacement must be string")
+        try:
+            src, flags_str = _extract_inline_flags(pattern)
+            flags = 0
+            if "i" in flags_str:
+                flags |= _re.IGNORECASE
+            if "m" in flags_str:
+                flags |= _re.MULTILINE
+            if "s" in flags_str:
+                flags |= _re.DOTALL
+            py_repl = _re.sub(r"\$(\d+)", r"\\\1", replacement)
+            return _re.sub(src, py_repl, str_val, flags=flags)
+        except _re.error as e:
+            raise XprError(f"invalid regex pattern: {e}")
+
+    def _min_variadic(*args):
+        if len(args) < 2:
+            raise XprError(
+                f"Wrong number of arguments for 'min': expected at least 2, got {len(args)}"
+            )
+        for a in args:
+            if isinstance(a, bool) or not isinstance(a, (int, float)):
+                raise XprError("Type error: min expects numbers")
+        return min(args)
+
+    def _max_variadic(*args):
+        if len(args) < 2:
+            raise XprError(
+                f"Wrong number of arguments for 'max': expected at least 2, got {len(args)}"
+            )
+        for a in args:
+            if isinstance(a, bool) or not isinstance(a, (int, float)):
+                raise XprError("Type error: max expects numbers")
+        return max(args)
+
     return {
         "round": _round,
         "floor": _floor,
         "ceil": _ceil,
         "abs": _abs,
-        "min": _min,
-        "max": _max,
+        "min": _min_variadic,
+        "max": _max_variadic,
         "type": _type,
         "int": _int,
         "float": _float,
         "string": _string,
         "bool": _bool,
         "range": _range,
+        "now": _now,
+        "parseDate": _parse_date,
+        "formatDate": _format_date,
+        "year": _year,
+        "month": _month,
+        "day": _day,
+        "hour": _hour,
+        "minute": _minute,
+        "second": _second,
+        "millisecond": _millisecond,
+        "dateAdd": _date_add,
+        "dateDiff": _date_diff,
+        "matches": _matches,
+        "match": _match,
+        "matchAll": _match_all,
+        "replacePattern": _replace_pattern,
     }
 
 
@@ -632,8 +935,6 @@ GLOBAL_FUNCTION_ARITY = {
     "floor": 1,
     "ceil": 1,
     "abs": 1,
-    "min": 2,
-    "max": 2,
     "type": 1,
     "int": 1,
     "float": 1,

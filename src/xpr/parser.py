@@ -109,7 +109,12 @@ class Parser:
     def _parse_arg_list(self) -> List[Expression]:
         args: List[Expression] = []
         while self._peek().type not in (TokenType.RightParen, TokenType.EOF):
-            args.append(self.expression(0))
+            if self._peek().type == TokenType.DotDotDot:
+                pos = self._peek().position
+                self._advance()
+                args.append(SpreadElement(argument=self.expression(0), position=pos))
+            else:
+                args.append(self.expression(0))
             if self._peek().type == TokenType.Comma:
                 self._advance()
             else:
