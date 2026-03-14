@@ -10,7 +10,7 @@
 ## Install
 
 ```bash
-pip install git+https://github.com/xpr-lang/xpr-python.git
+pip install xpr-lang
 ```
 
 Requires Python 3.10+.

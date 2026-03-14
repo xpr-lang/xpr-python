@@ -4,10 +4,25 @@ version = "0.2.0"
 description = "XPR expression language - Python runtime"
 requires-python = ">=3.10"
 license = {text = "MIT"}
+readme = "README.md"
+keywords = ["expression", "language", "sandbox", "transform", "pipeline", "xpr"]
+authors = [{name = "XPR Lang"}]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries",
+]
 
 [project.urls]
 Homepage = "https://github.com/xpr-lang/xpr-python"
 Specification = "https://github.com/xpr-lang/xpr"
+Repository = "https://github.com/xpr-lang/xpr-python"
+Issues = "https://github.com/xpr-lang/xpr-python/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/xpr"]
