@@ -38,6 +38,7 @@ from .functions import (
     is_regex,
     GLOBAL_FUNCTIONS,
     GLOBAL_FUNCTION_ARITY,
+    GLOBAL_CONSTANTS,
 )
 
 
@@ -210,6 +211,8 @@ def eval_expr(
     if isinstance(node, Identifier):
         if node.name in ctx:
             return ctx[node.name]
+        if node.name in GLOBAL_CONSTANTS:
+            return GLOBAL_CONSTANTS[node.name]
         if node.name in GLOBAL_FUNCTIONS:
             return GLOBAL_FUNCTIONS[node.name]
         if node.name in fns:
@@ -374,6 +377,7 @@ def eval_expr(
     if isinstance(node, ArrowFunction):
         params = node.params
         body = node.body
+        rest_param = node.rest_param
         captured_ctx = dict(ctx)
 
         def arrow(*args):
@@ -387,6 +391,8 @@ def eval_expr(
                         e, _ctx, fns, depth + 1, start_time
                     )
                     _destructure_into(p, arg, child_ctx, inner_nxt)
+            if rest_param:
+                child_ctx[rest_param] = list(args[len(params) :])
             return eval_expr(body, child_ctx, fns, depth + 1, start_time)
 
         return arrow

@@ -102,6 +102,7 @@ class ArrowFunction:
     params: List[Any]  # List[str | ObjectPattern | ArrayPattern]
     body: Any
     position: int
+    rest_param: Optional[str] = None
 
 
 @dataclass

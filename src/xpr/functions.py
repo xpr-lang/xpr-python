@@ -128,8 +128,10 @@ def call_string_method(obj: Any, method: str, args: List[Any], pos: int) -> Any:
                 f"Wrong number of arguments for 'split': expected 1, got {len(args)}",
                 pos,
             )
+        if is_regex(args[0]):
+            return _re.split(args[0]["compiled"], s)
         if not isinstance(args[0], str):
-            raise XprError("Type error: split expects string argument", pos)
+            raise XprError("Type error: split expects string or regex argument", pos)
         return s.split(args[0])
     if method == "replace":
         if len(args) != 2:
@@ -490,6 +492,154 @@ def call_array_method(obj: Any, method: str, args: List[Any], pos: int) -> Any:
                 groups[key] = []
             groups[key].append(el)
         return {k: groups[k] for k in sorted(groups.keys())}
+
+    if method == "sortBy":
+        if len(args) != 1 or not callable(args[0]):
+            raise XprError(
+                f"Wrong number of arguments for 'sortBy': expected 1 function, got {len(args)}",
+                pos,
+            )
+        fn = args[0]
+        keys = [fn(el) for el in arr]
+        if not keys:
+            return []
+        all_numbers = all(
+            isinstance(k, (int, float)) and not isinstance(k, bool) for k in keys
+        )
+        all_strings = all(isinstance(k, str) for k in keys)
+        if not all_numbers and not all_strings:
+            raise XprError(
+                "Type error: sortBy key function must return all numbers or all strings",
+                pos,
+            )
+        paired = list(zip(keys, arr))
+        paired.sort(key=lambda x: x[0])  # type: ignore[return-value]
+        return [x[1] for x in paired]
+    if method == "take":
+        if len(args) != 1:
+            raise XprError(
+                f"Wrong number of arguments for 'take': expected 1, got {len(args)}",
+                pos,
+            )
+        n = args[0]
+        if not isinstance(n, (int, float)) or isinstance(n, bool) or n != int(n):
+            raise XprError("Type error: take expects integer argument", pos)
+        n = int(n)
+        return [] if n <= 0 else arr[:n]
+    if method == "drop":
+        if len(args) != 1:
+            raise XprError(
+                f"Wrong number of arguments for 'drop': expected 1, got {len(args)}",
+                pos,
+            )
+        n = args[0]
+        if not isinstance(n, (int, float)) or isinstance(n, bool) or n != int(n):
+            raise XprError("Type error: drop expects integer argument", pos)
+        n = int(n)
+        return arr if n <= 0 else arr[n:]
+    if method == "count":
+        if len(args) != 1 or not callable(args[0]):
+            raise XprError(
+                f"Wrong number of arguments for 'count': expected 1 function, got {len(args)}",
+                pos,
+            )
+        return sum(1 for el in arr if is_truthy(args[0](el)))
+    if method == "sum":
+        if args:
+            raise XprError(
+                f"Wrong number of arguments for 'sum': expected 0, got {len(args)}", pos
+            )
+        if not arr:
+            return 0.0
+        for el in arr:
+            if not isinstance(el, (int, float)) or isinstance(el, bool):
+                raise XprError(
+                    f"Type error: sum expects all elements to be numbers, got {xpr_type(el)}",
+                    pos,
+                )
+        return float(sum(el for el in arr))
+    if method == "avg":
+        if args:
+            raise XprError(
+                f"Wrong number of arguments for 'avg': expected 0, got {len(args)}", pos
+            )
+        if not arr:
+            raise XprError("Type error: cannot compute average of empty array", pos)
+        for el in arr:
+            if not isinstance(el, (int, float)) or isinstance(el, bool):
+                raise XprError(
+                    f"Type error: avg expects all elements to be numbers, got {xpr_type(el)}",
+                    pos,
+                )
+        return float(sum(el for el in arr)) / len(arr)
+    if method == "compact":
+        if args:
+            raise XprError(
+                f"Wrong number of arguments for 'compact': expected 0, got {len(args)}",
+                pos,
+            )
+        return [el for el in arr if el is not None]
+    if method == "partition":
+        if len(args) != 1 or not callable(args[0]):
+            raise XprError(
+                f"Wrong number of arguments for 'partition': expected 1 function, got {len(args)}",
+                pos,
+            )
+        matches = [el for el in arr if is_truthy(args[0](el))]
+        non_matches = [el for el in arr if not is_truthy(args[0](el))]
+        return [matches, non_matches]
+    if method == "keyBy":
+        if len(args) != 1 or not callable(args[0]):
+            raise XprError(
+                f"Wrong number of arguments for 'keyBy': expected 1 function, got {len(args)}",
+                pos,
+            )
+        result = {}
+        for el in arr:
+            result[str(args[0](el))] = el
+        return {k: result[k] for k in sorted(result.keys())}
+    if method == "min":
+        if args:
+            raise XprError(
+                f"Wrong number of arguments for 'min': expected 0, got {len(args)}", pos
+            )
+        if not arr:
+            raise XprError("Type error: cannot compute min of empty array", pos)
+        for el in arr:
+            if not isinstance(el, (int, float)) or isinstance(el, bool):
+                raise XprError(
+                    f"Type error: min expects all elements to be numbers, got {xpr_type(el)}",
+                    pos,
+                )
+        return float(min(float(el) for el in arr))
+    if method == "max":
+        if args:
+            raise XprError(
+                f"Wrong number of arguments for 'max': expected 0, got {len(args)}", pos
+            )
+        if not arr:
+            raise XprError("Type error: cannot compute max of empty array", pos)
+        for el in arr:
+            if not isinstance(el, (int, float)) or isinstance(el, bool):
+                raise XprError(
+                    f"Type error: max expects all elements to be numbers, got {xpr_type(el)}",
+                    pos,
+                )
+        return float(max(float(el) for el in arr))
+    if method == "first":
+        if args:
+            raise XprError(
+                f"Wrong number of arguments for 'first': expected 0, got {len(args)}",
+                pos,
+            )
+        return arr[0] if arr else None
+    if method == "last":
+        if args:
+            raise XprError(
+                f"Wrong number of arguments for 'last': expected 0, got {len(args)}",
+                pos,
+            )
+        return arr[-1] if arr else None
 
     raise XprError(f"Type error: cannot call method '{method}' on array", pos)
 
@@ -965,7 +1115,109 @@ def _make_global_functions() -> dict:
         "match": _match,
         "matchAll": _match_all,
         "replacePattern": _replace_pattern,
+        "sqrt": _sqrt,
+        "log": _log,
+        "pow": _pow,
+        "random": _random,
+        "sign": _sign,
+        "trunc": _trunc,
+        "isNumber": _is_number,
+        "isString": _is_string,
+        "isArray": _is_array,
+        "isNull": _is_null,
+        "isObject": _is_object,
+        "isRegex": _is_regex_pred,
+        "fromEntries": _from_entries,
     }
+
+
+def _sqrt(n):
+    if not isinstance(n, (int, float)) or isinstance(n, bool):
+        raise XprError("Type error: sqrt expects number")
+    if float(n) < 0:
+        raise XprError("Type error: cannot compute sqrt of negative number")
+    return math.sqrt(float(n))
+
+
+def _log(n):
+    if not isinstance(n, (int, float)) or isinstance(n, bool):
+        raise XprError("Type error: log expects number")
+    if float(n) <= 0:
+        raise XprError("Type error: cannot compute log of non-positive number")
+    return math.log(float(n))
+
+
+def _pow(x, y):
+    if not isinstance(x, (int, float)) or isinstance(x, bool):
+        raise XprError("Type error: pow expects number")
+    if not isinstance(y, (int, float)) or isinstance(y, bool):
+        raise XprError("Type error: pow expects number")
+    return math.pow(float(x), float(y))
+
+
+def _random():
+    import random as _random_mod
+
+    return float(_random_mod.random())
+
+
+def _sign(n):
+    if not isinstance(n, (int, float)) or isinstance(n, bool):
+        raise XprError("Type error: sign expects number")
+    v = float(n)
+    if v > 0:
+        return 1.0
+    if v < 0:
+        return -1.0
+    return 0.0
+
+
+def _trunc(n):
+    if not isinstance(n, (int, float)) or isinstance(n, bool):
+        raise XprError("Type error: trunc expects number")
+    return float(math.trunc(float(n)))
+
+
+def _is_number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _is_string(v):
+    return isinstance(v, str)
+
+
+def _is_array(v):
+    return isinstance(v, list)
+
+
+def _is_null(v):
+    return v is None
+
+
+def _is_object(v):
+    return isinstance(v, dict) and not is_regex(v)
+
+
+def _is_regex_pred(v):
+    return is_regex(v)
+
+
+def _from_entries(pairs):
+    if not isinstance(pairs, list):
+        raise XprError("Type error: fromEntries expects array")
+    result = {}
+    for pair in pairs:
+        if not isinstance(pair, list) or len(pair) < 2:
+            raise XprError(
+                "Type error: fromEntries each element must be [key, value] pair"
+            )
+        raw_key = pair[0]
+        if isinstance(raw_key, float) and raw_key == int(raw_key):
+            key = str(int(raw_key))
+        else:
+            key = str(raw_key)
+        result[key] = pair[1]
+    return {k: result[k] for k in sorted(result.keys())}
 
 
 GLOBAL_FUNCTIONS = _make_global_functions()
@@ -979,4 +1231,22 @@ GLOBAL_FUNCTION_ARITY = {
     "float": 1,
     "string": 1,
     "bool": 1,
+    "sqrt": 1,
+    "log": 1,
+    "sign": 1,
+    "trunc": 1,
+    "isNumber": 1,
+    "isString": 1,
+    "isArray": 1,
+    "isNull": 1,
+    "isObject": 1,
+    "isRegex": 1,
+    "fromEntries": 1,
+    "pow": 2,
+    "random": 0,
+}
+
+GLOBAL_CONSTANTS = {
+    "PI": math.pi,
+    "E": math.e,
 }

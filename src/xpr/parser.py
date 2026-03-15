@@ -236,15 +236,21 @@ class Parser:
         self._expect(TokenType.RightBracket)
         return ArrayPattern(elements=elements, position=pos)
 
-    def _parse_arrow_param_list(self) -> List[Any]:
+    def _parse_arrow_param_list(self):
         params: List[Any] = []
+        rest_param = None
         while self._peek().type not in (TokenType.RightParen, TokenType.EOF):
+            if self._peek().type == TokenType.DotDotDot:
+                self._advance()
+                rest_id = self._expect(TokenType.Identifier)
+                rest_param = rest_id.value
+                break
             params.append(self._parse_binding_target())
             if self._peek().type == TokenType.Comma:
                 self._advance()
             else:
                 break
-        return params
+        return params, rest_param
 
     def _parse_arg_list(self) -> List[Expression]:
         args: List[Expression] = []
@@ -309,7 +315,9 @@ class Parser:
             if self._peek().type == TokenType.Arrow:
                 self._advance()
                 body = self.expression(0)
-                return ArrowFunction(params=[token.value], body=body, position=pos)
+                return ArrowFunction(
+                    params=[token.value], body=body, position=pos, rest_param=None
+                )
             return ident
 
         if t == TokenType.LeftParen:
@@ -317,13 +325,26 @@ class Parser:
                 self._advance()
                 self._expect(TokenType.Arrow)
                 body = self.expression(0)
-                return ArrowFunction(params=[], body=body, position=pos)
-            if self._peek().type in (TokenType.LeftBrace, TokenType.LeftBracket):
-                params_list = self._parse_arrow_param_list()
+                return ArrowFunction(
+                    params=[], body=body, position=pos, rest_param=None
+                )
+            if self._peek().type == TokenType.DotDotDot:
+                self._advance()
+                rest_id = self._expect(TokenType.Identifier)
                 self._expect(TokenType.RightParen)
                 self._expect(TokenType.Arrow)
                 body = self.expression(0)
-                return ArrowFunction(params=params_list, body=body, position=pos)
+                return ArrowFunction(
+                    params=[], body=body, position=pos, rest_param=rest_id.value
+                )
+            if self._peek().type in (TokenType.LeftBrace, TokenType.LeftBracket):
+                params_list, rest_param = self._parse_arrow_param_list()
+                self._expect(TokenType.RightParen)
+                self._expect(TokenType.Arrow)
+                body = self.expression(0)
+                return ArrowFunction(
+                    params=params_list, body=body, position=pos, rest_param=rest_param
+                )
             first = self.expression(0)
             if self._peek().type == TokenType.Comma:
                 params: List[Any] = []
@@ -333,9 +354,15 @@ class Parser:
                         pos,
                     )
                 params.append(first.name)
+                rest_param = None
                 while self._peek().type == TokenType.Comma:
                     self._advance()
-                    if self._peek().type == TokenType.LeftBrace:
+                    if self._peek().type == TokenType.DotDotDot:
+                        self._advance()
+                        rest_id = self._expect(TokenType.Identifier)
+                        rest_param = rest_id.value
+                        break
+                    elif self._peek().type == TokenType.LeftBrace:
                         params.append(self._parse_object_pattern())
                     elif self._peek().type == TokenType.LeftBracket:
                         params.append(self._parse_array_pattern())
@@ -345,12 +372,16 @@ class Parser:
                 self._expect(TokenType.RightParen)
                 self._expect(TokenType.Arrow)
                 body = self.expression(0)
-                return ArrowFunction(params=params, body=body, position=pos)
+                return ArrowFunction(
+                    params=params, body=body, position=pos, rest_param=rest_param
+                )
             self._expect(TokenType.RightParen)
             if isinstance(first, Identifier) and self._peek().type == TokenType.Arrow:
                 self._advance()
                 body = self.expression(0)
-                return ArrowFunction(params=[first.name], body=body, position=pos)
+                return ArrowFunction(
+                    params=[first.name], body=body, position=pos, rest_param=None
+                )
             return first
 
         if t == TokenType.Let:
